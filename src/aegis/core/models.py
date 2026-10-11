@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from aegis.core.enums import Ecosystem, ManifestKind, NoticeCode, NoticeLevel
+from aegis.core.enums import Ecosystem, ManifestKind, NoticeCode, NoticeLevel, Severity
 
 
 class _Frozen(BaseModel):
@@ -63,3 +65,63 @@ class ResolutionResult(_Frozen):
 
     dependencies: tuple[Dependency, ...] = ()
     notices: tuple[Notice, ...] = ()
+
+
+class FixStatus(StrEnum):
+    """Whether a safe upgrade path exists for a finding."""
+
+    AVAILABLE = "available"  # a safe fixed version was computed
+    NO_FIX = "no_fix"  # the vulnerable range has no 'fixed' event
+    UNRESOLVED = "unresolved"  # candidates exist but every one lands in another window
+
+
+class UpgradeDistance(StrEnum):
+    """How large an upgrade the fix requires (patch < minor < major)."""
+
+    PATCH = "patch"
+    MINOR = "minor"
+    MAJOR = "major"
+
+
+class Remediation(_Frozen):
+    """Concrete upgrade guidance for one finding."""
+
+    fixed_version: str | None = None
+    status: FixStatus = FixStatus.NO_FIX
+    distance: UpgradeDistance | None = None
+    safe_upgrade: bool = False  # True when not crossing a major boundary
+    command: str | None = None  # primary suggested command
+    alternatives: tuple[str, ...] = ()  # additional commands (overrides, constraints)
+    path: tuple[str, ...] = ()  # resolved_from chain, direct first
+
+
+class Finding(_Frozen):
+    """One (dependency, vulnerability) pair that applies to the scanned project."""
+
+    vuln_id: str  # primary display ID (smallest CVE alias, else OSV id)
+    aliases: tuple[str, ...] = ()  # all known IDs, sorted
+    package: str
+    version: str
+    ecosystem: Ecosystem
+    severity: Severity
+    cvss_score: float | None = None
+    cvss_vector: str | None = None
+    summary: str = ""
+    introduced_version: str | None = None
+    direct: bool | None
+    sources: tuple[str, ...] = ()  # rel_paths that declared this dependency
+    line: int | None = None
+    remediation: Remediation = Field(default_factory=Remediation)
+    unverified: bool = False  # True when range evaluation could not be completed
+    group_id: str | None = None  # set by grouping when part of a group-fixable set
+    published: datetime | None = None  # OSV published timestamp, if parseable
+    references: tuple[str, ...] = ()
+
+
+class AuditReport(_Frozen):
+    """Aggregated output of a full audit run."""
+
+    root: str
+    findings: tuple[Finding, ...] = ()
+    notices: tuple[Notice, ...] = ()
+    ecosystem_counts: dict[str, int] = Field(default_factory=dict)

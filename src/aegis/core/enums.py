@@ -107,3 +107,8 @@ class NoticeCode(StrEnum):
     CACHE_SCHEMA_RESET = "cache-schema-reset"
     NVD_REQUEST_FAILED = "nvd-request-failed"
     CVSS_UNSUPPORTED = "cvss-unsupported"
+    # matching and remediation
+    UNVERIFIED_RANGE = "unverified-range"
+    NO_FIX_AVAILABLE = "no-fix-available"
+    UNRESOLVED_FIX = "unresolved-fix"
+    SEVERITY_OVERRIDDEN = "severity-overridden"

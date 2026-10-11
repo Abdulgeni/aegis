@@ -123,11 +123,12 @@ def _evaluate_range(
             lower = None
         else:
             return RangeVerdict.UNVERIFIABLE
-    if (
-        lower is not None
-        and lower is not _UNBOUNDED
-        and matcher.compare(parsed, lower) >= 0
-    ):
+    # An interval was opened and never closed. If lower is unbounded (or was never set),
+    # every version is in the interval; otherwise the parsed version is in it when it is
+    # greater than or equal to lower.
+    if lower is _UNBOUNDED:
+        return RangeVerdict.AFFECTED
+    if lower is not None and lower is not _PARSE_ERROR and matcher.compare(parsed, lower) >= 0:
         return RangeVerdict.AFFECTED
     return RangeVerdict.NOT_AFFECTED
 
@@ -158,7 +159,7 @@ def _check_close(
     upper = matcher.parse(raw_upper)
     if upper is None:
         return RangeVerdict.UNVERIFIABLE
-    below = True if lower is _UNBOUNDED else matcher.compare(parsed, lower) >= 0
+    below = True if lower is _UNBOUNDED or lower is None else matcher.compare(parsed, lower) >= 0
     if not below:
         return RangeVerdict.NOT_AFFECTED
     cmp = matcher.compare(parsed, upper)

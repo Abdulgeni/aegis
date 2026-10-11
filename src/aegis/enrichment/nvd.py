@@ -7,6 +7,7 @@ shape as the OSV client: injectable session, async, retry/backoff on 429/5xx.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
@@ -41,15 +42,15 @@ class NvdClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout_s: float = 30.0,
         max_retries: int = 3,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        rand: Callable[[], float] = random.random,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+        rand: Callable[[], float] | None = None,
     ) -> None:
         self._api_key = api_key
         self._session = session or httpx.AsyncClient(timeout=timeout_s)
         self._base_url = base_url
         self._max_retries = max_retries
-        self._sleep = sleep
-        self._rand = rand
+        self._sleep = sleep if sleep is not None else asyncio.sleep
+        self._rand = rand if rand is not None else random.random
 
     async def close(self) -> None:
         """Close the underlying HTTP session."""
@@ -99,15 +100,15 @@ class NvdClient:
             if attempt == self._max_retries:
                 break
             await self._sleep(delay)
-        raise NvdError(f"NVD request failed after {self._max_retries + 1} attempts ({last_error})")
+        raise NvdError(
+            f"NVD request failed after {self._max_retries + 1} attempts ({last_error})"
+        )
 
     def _backoff(self, attempt: int, retry_after: str | None) -> float:
         delay = min(30.0, 1.0 * float(2**attempt)) * (0.5 + 0.5 * self._rand())
         if retry_after:
-            try:
+            with contextlib.suppress(ValueError):
                 delay = max(delay, min(float(retry_after), 30.0))
-            except ValueError:
-                pass
         return delay
 
 

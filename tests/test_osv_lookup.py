@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from aegis.core.enums import Ecosystem, NoticeCode
 from aegis.core.models import Dependency
 from aegis.osv.cache import OsvCache, query_key
@@ -73,7 +71,6 @@ async def test_lookup_batches_and_fetches_records() -> None:
     lookup = OsvLookup(client)
     records, notices = await lookup.lookup([_dep("a", "1.0"), _dep("b", "2.0"), _dep("c", "3.0")])
     assert len(client.batch_calls) == 1
-    # CVE-2 is fetched only once despite appearing for both a and b
     assert sorted(client.fetch_calls) == ["CVE-1", "CVE-2"]
     assert [r.id for r in records[("PyPI", "a", "1.0")]] == ["CVE-1", "CVE-2"]
     assert [r.id for r in records[("PyPI", "b", "2.0")]] == ["CVE-2"]
@@ -91,7 +88,9 @@ async def test_unversioned_dependencies_are_skipped() -> None:
 
 
 async def test_duplicate_queries_are_deduplicated() -> None:
-    client = FakeClient(batch={("PyPI", "a", "1.0"): ("CVE-1",)}, records={"CVE-1": {"id": "CVE-1"}})
+    client = FakeClient(
+        batch={("PyPI", "a", "1.0"): ("CVE-1",)}, records={"CVE-1": {"id": "CVE-1"}}
+    )
     lookup = OsvLookup(client)
     await lookup.lookup([_dep("a", "1.0"), _dep("a", "1.0"), _dep("a", "1.0")])
     assert len(client.batch_calls[0]) == 1

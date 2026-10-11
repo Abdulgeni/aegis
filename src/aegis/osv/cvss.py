@@ -13,7 +13,6 @@ The single public entry point is ``score_vector(vector)`` which returns a
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 
 from aegis.core.enums import Severity
@@ -91,13 +90,12 @@ def _score_v3(vector: str) -> CvssResult:
         iss = 1.0 - (
             (1 - _CIA[metrics["C"]]) * (1 - _CIA[metrics["I"]]) * (1 - _CIA[metrics["A"]])
         )
-        if metrics["S"] == "C":
-            impact = 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
-            raw = min(1.08 * (impact + exploitability), 10.0)
-        else:
-            impact = 6.42 * iss
-            raw = min(impact + exploitability, 10.0)
-        score = _roundup(raw)
+        scope_changed = metrics["S"] == "C"
+        impact = (
+            7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15
+            if scope_changed
+            else 6.42 * iss
+        )
     except KeyError as exc:
         return CvssResult(
             score=None,
@@ -105,11 +103,15 @@ def _score_v3(vector: str) -> CvssResult:
             version="v3",
             reason=f"invalid metric value: {exc}",
         )
-    return CvssResult(
-        score=score,
-        severity_band=Severity.from_score(score),
-        version="v3",
-    )
+    # CVSS v3.1 spec section 7.1: if Impact <= 0, Base Score is 0 regardless of exploitability.
+    if impact <= 0:
+        return CvssResult(score=0.0, severity_band=Severity.UNKNOWN, version="v3")
+    if scope_changed:
+        raw = min(1.08 * (impact + exploitability), 10.0)
+    else:
+        raw = min(impact + exploitability, 10.0)
+    score = _roundup(raw)
+    return CvssResult(score=score, severity_band=Severity.from_score(score), version="v3")
 
 
 def _parse_metrics(vector: str) -> dict[str, str]:
@@ -124,6 +126,3 @@ def _parse_metrics(vector: str) -> dict[str, str]:
 def _roundup(value: float) -> float:
     """CVSS v3.1 Roundup: round up to one decimal place, avoiding float error."""
     return math.ceil(value * 10) / 10 if value > 0 else 0.0
-
-
-_VECTOR_RE = re.compile(r"^CVSS:3\.[01]/")

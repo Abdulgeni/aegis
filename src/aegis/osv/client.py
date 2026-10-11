@@ -3,9 +3,9 @@
 Uses ``httpx.AsyncClient`` but the session is injectable, so tests use a fake. The client
 exposes two operations:
 
-* ``query_batch(queries)`` — POST /v1/querybatch, chunked at ``BATCH_CHUNK`` queries per
+* ``query_batch(queries)`` - POST /v1/querybatch, chunked at ``BATCH_CHUNK`` queries per
   request. Returns a flat list of results in the input order.
-* ``fetch_vuln(vuln_id)`` — GET /v1/vulns/{id}, returns the raw JSON dict.
+* ``fetch_vuln(vuln_id)`` - GET /v1/vulns/{id}, returns the raw JSON dict.
 
 Both operations retry on 429/5xx and on transient network errors, honour ``Retry-After``,
 respect a shared concurrency semaphore, and raise ``OsvError`` on final failure.
@@ -14,6 +14,7 @@ respect a shared concurrency semaphore, and raise ``OsvError`` on final failure.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -74,6 +75,9 @@ class OsvClient:
         max_retries: Retries after the first attempt on retryable failures.
         backoff_base: First backoff delay in seconds; doubles each retry.
         backoff_max: Cap on backoff delay.
+        sleep: Injected sleep callable for tests; defaults to ``asyncio.sleep`` at
+            construction time so monkeypatching ``asyncio.sleep`` works as expected.
+        rand: Injected RNG for deterministic backoff in tests.
     """
 
     def __init__(
@@ -86,8 +90,8 @@ class OsvClient:
         max_retries: int = 5,
         backoff_base: float = 1.0,
         backoff_max: float = 30.0,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-        rand: Callable[[], float] = random.random,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
+        rand: Callable[[], float] | None = None,
     ) -> None:
         self._session = session or httpx.AsyncClient(timeout=timeout_s)
         self._base_url = base_url.rstrip("/")
@@ -95,8 +99,8 @@ class OsvClient:
         self._max_retries = max_retries
         self._backoff_base = backoff_base
         self._backoff_max = backoff_max
-        self._sleep = sleep
-        self._rand = rand
+        self._sleep = sleep if sleep is not None else asyncio.sleep
+        self._rand = rand if rand is not None else random.random
 
     async def close(self) -> None:
         """Close the underlying HTTP session."""
@@ -134,7 +138,11 @@ class OsvClient:
             if isinstance(entry, dict):
                 vulns = entry.get("vulns")
                 if isinstance(vulns, list):
-                    ids = [v["id"] for v in vulns if isinstance(v, dict) and isinstance(v.get("id"), str)]
+                    ids = [
+                        v["id"]
+                        for v in vulns
+                        if isinstance(v, dict) and isinstance(v.get("id"), str)
+                    ]
             hits.append(BatchHit(query=query, vuln_ids=tuple(ids)))
         return hits
 
@@ -172,16 +180,16 @@ class OsvClient:
             if attempt == self._max_retries:
                 break
             await self._sleep(delay)
-        raise OsvError(f"OSV request to {url} failed after {self._max_retries + 1} attempts ({last_error})")
+        raise OsvError(
+            f"OSV request to {url} failed after {self._max_retries + 1} attempts ({last_error})"
+        )
 
     def _backoff(self, attempt: int, retry_after: str | None) -> float:
         ceiling = min(self._backoff_max, self._backoff_base * float(2**attempt))
         delay = ceiling * (0.5 + 0.5 * self._rand())
         if retry_after:
-            try:
+            with contextlib.suppress(ValueError):
                 delay = max(delay, min(float(retry_after), self._backoff_max))
-            except ValueError:
-                pass
         return delay
 
 

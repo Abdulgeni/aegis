@@ -1,0 +1,31 @@
+# The Aegis repo's own dependency audit, run against itself.
+#
+# This is the same workflow external users are encouraged to copy (see
+# examples/github-workflow.yml) but pointed at the checked-out tree rather than at a
+# remote action, so it also serves as an end-to-end smoke test of the composite action.
+
+name: Dependency audit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  aegis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run composite action against this repo
+        uses: ./
+        with:
+          path: '.'
+          fail-on: 'critical'
+          output: 'sarif'
+          output-file: 'aegis.sarif'
+          upload-sarif: 'true'

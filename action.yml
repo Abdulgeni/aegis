@@ -1,0 +1,131 @@
+name: 'Aegis Dependency Audit'
+description: 'Scan lock files for known vulnerabilities via OSV.dev; optionally upload SARIF to Code Scanning.'
+author: 'Abdulgeni'
+
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'File or directory to scan.'
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Severity threshold that fails the workflow (critical|high|medium|low|info).'
+    required: false
+    default: 'high'
+  output:
+    description: 'Report format (table|json|sarif|markdown).'
+    required: false
+    default: 'sarif'
+  output-file:
+    description: 'Where to write the report file.'
+    required: false
+    default: 'aegis.sarif'
+  upload-sarif:
+    description: 'Upload the SARIF report to GitHub Code Scanning.'
+    required: false
+    default: 'true'
+  extra-args:
+    description: 'Additional arguments passed to `aegis scan` (e.g. `--only-direct --ecosystem pypi`).'
+    required: false
+    default: ''
+  install-from-pypi:
+    description: 'Install a specific version from PyPI instead of the git ref. Empty means install from git.'
+    required: false
+    default: ''
+  install-git-ref:
+    description: 'Git ref used when `install-from-pypi` is empty.'
+    required: false
+    default: 'main'
+
+outputs:
+  exit-code:
+    description: 'Exit code from `aegis scan`: 0 clean, 1 findings at or above fail-on, 2 tool error.'
+    value: ${{ steps.scan.outputs.exit_code }}
+  report-file:
+    description: 'Path to the report file that was written.'
+    value: ${{ inputs.output-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: pip
+
+    - name: Install Aegis
+      shell: bash
+      env:
+        INSTALL_FROM_PYPI: ${{ inputs.install-from-pypi }}
+        INSTALL_GIT_REF: ${{ inputs.install-git-ref }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        if [ -n "$INSTALL_FROM_PYPI" ]; then
+          python -m pip install "aegis-audit==${INSTALL_FROM_PYPI}"
+        else
+          python -m pip install "git+https://github.com/Abdulgeni/aegis.git@${INSTALL_GIT_REF}"
+        fi
+
+    - name: Run aegis scan
+      id: scan
+      continue-on-error: true
+      shell: bash
+      env:
+        # Inputs are passed through env vars, never interpolated into the shell.
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        # shellcheck disable=SC2086
+        aegis scan "$INPUT_PATH" \
+          --output "$INPUT_OUTPUT" \
+          --out "$INPUT_OUTPUT_FILE" \
+          --fail-on "$INPUT_FAIL_ON" \
+          $INPUT_EXTRA_ARGS
+        code=$?
+        echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+        exit 0
+
+    - name: Write job summary
+      if: always()
+      shell: bash
+      env:
+        INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+      run: |
+        {
+          echo "## Aegis dependency audit"
+          echo ""
+          if [ -f "$INPUT_OUTPUT_FILE" ]; then
+            echo "Report written to \`$INPUT_OUTPUT_FILE\` (format: \`$INPUT_OUTPUT\`)."
+          else
+            echo "No report file was produced."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload SARIF to Code Scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && inputs.output == 'sarif' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output-file }}
+        category: aegis
+
+    - name: Fail on scan findings
+      if: ${{ always() && steps.scan.outputs.exit_code != '0' }}
+      shell: bash
+      env:
+        SCAN_EXIT_CODE: ${{ steps.scan.outputs.exit_code }}
+      run: |
+        if [ -z "$SCAN_EXIT_CODE" ]; then
+          echo "aegis scan did not produce an exit code; treating as tool error"
+          exit 2
+        fi
+        echo "aegis scan exited with $SCAN_EXIT_CODE"
+        exit "$SCAN_EXIT_CODE"

@@ -1,0 +1,51 @@
+# Copy this file into .github/workflows/audit.yml in your repository.
+#
+# It runs Aegis on every pull request and on pushes to main, fails the workflow when a
+# HIGH-or-worse finding is present, and uploads the SARIF report to GitHub Code Scanning
+# so findings appear in the repository's Security tab.
+#
+# The upload step uses `if: always()` so the SARIF is uploaded even when the scan itself
+# exited 1 because of findings.
+
+name: Dependency audit
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  aegis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aegis dependency audit
+        uses: Abdulgeni/aegis@main
+        with:
+          path: '.'
+          fail-on: 'high'
+          output: 'sarif'
+          output-file: 'aegis.sarif'
+          upload-sarif: 'true'
+          # Uncomment to restrict the audit:
+          # extra-args: '--only-direct --ecosystem pypi'
+
+      - name: Upload SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: aegis.sarif
+          category: aegis
+
+# Note: the composite action already uploads SARIF itself when `upload-sarif: 'true'`,
+# so the explicit upload step above is only needed if you set `upload-sarif: 'false'`
+# and want to control the upload separately. For most users the action alone is enough:
+#
+#   - uses: Abdulgeni/aegis@main
+#     with:
+#       fail-on: high

@@ -12,6 +12,7 @@ dependencies = [
     "packaging>=23.0",
     "pydantic>=2.6,<3",
     "pyyaml>=6.0",
+    "rich>=13.7",
     "semver>=3.0",
 ]
 
@@ -53,3 +54,7 @@ python_version = "3.11"
 strict = true
 files = ["src"]
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["rich", "rich.*"]
+ignore_missing_imports = true
